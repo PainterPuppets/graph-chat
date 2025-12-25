@@ -10,7 +10,6 @@ import { Streamdown } from "streamdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { getApiKeyHeader } from "@/components/api-key-provider";
 import { trpc } from "@/utils/trpc";
@@ -65,9 +64,9 @@ function ChatArea({ config, selectedGraph }: { config: ChatConfig; selectedGraph
   };
 
   return (
-    <>
+    <div className="flex flex-1 flex-col overflow-hidden">
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
+      <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-muted-foreground">
@@ -126,7 +125,7 @@ function ChatArea({ config, selectedGraph }: { config: ChatConfig; selectedGraph
             <div ref={messagesEndRef} />
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       {/* Input */}
       <div className="border-t p-4">
@@ -145,7 +144,7 @@ function ChatArea({ config, selectedGraph }: { config: ChatConfig; selectedGraph
           </Button>
         </form>
       </div>
-    </>
+    </div>
   );
 }
 
