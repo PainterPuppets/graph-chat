@@ -15,6 +15,8 @@
     "@getzep/zep-cloud": "^3.13.0",
     "@graph-chat/api": "workspace:*",
     "@libsql/client": "catalog:",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-popover": "^1.1.15",
     "@tanstack/react-form": "^1.27.3",
     "@tanstack/react-query": "^5.90.12",
     "@trpc/client": "catalog:",
@@ -24,6 +26,8 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "d3": "^7.9.0",
+    "dayjs": "^1.11.19",
     "dotenv": "catalog:",
     "libsql": "catalog:",
     "lucide-react": "^0.546.0",
@@ -40,13 +44,14 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@graph-chat/config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.10",
+    "@tanstack/react-query-devtools": "^5.91.1",
+    "@types/d3": "^7.4.3",
     "@types/node": "^20",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.10",
-    "typescript": "catalog:",
-    "@tanstack/react-query-devtools": "^5.91.1",
-    "@graph-chat/config": "workspace:*"
+    "typescript": "catalog:"
   }
 }
