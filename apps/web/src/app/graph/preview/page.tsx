@@ -14,18 +14,14 @@ import {
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { GraphVisualization } from "@/components/graph/GraphVisualization";
 import type { RawTriplet } from "@/lib/types/graph";
-import { listGraphs, getGraphTriplets, listEntityTypes, type EntityTypeInfo } from "../actions";
+import { listGraphs, getGraphTriplets, listEntityTypes } from "../actions";
+import { Zep } from "@getzep/zep-cloud";
 
-type GraphInfo = {
-  graphId: string;
-  name?: string;
-};
 
 export default function GraphPreviewPage() {
-  const [graphs, setGraphs] = useState<GraphInfo[]>([]);
+  const [graphs, setGraphs] = useState<Zep.Graph[]>([]);
   const [isLoadingGraphs, setIsLoadingGraphs] = useState(true);
   const [selectedGraphId, setSelectedGraphId] = useState<string>("");
   const [triplets, setTriplets] = useState<RawTriplet[]>([]);
@@ -33,7 +29,7 @@ export default function GraphPreviewPage() {
   const [graphError, setGraphError] = useState<string | null>(null);
 
   // Entity types state
-  const [entityTypes, setEntityTypes] = useState<EntityTypeInfo[]>([]);
+  const [entityTypes, setEntityTypes] = useState<Zep.EntityType[]>([]);
   const [isLoadingEntityTypes, setIsLoadingEntityTypes] = useState(false);
   const [showEntityTypes, setShowEntityTypes] = useState(true);
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
@@ -162,7 +158,7 @@ export default function GraphPreviewPage() {
                             </div>
                           )}
                         </div>
-                        {type.fields && Object.keys(type.fields).length > 0 && (
+                        {type.properties && type.properties.length > 0 && (
                           expandedTypes.has(type.name) ? (
                             <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
                           ) : (
@@ -171,19 +167,16 @@ export default function GraphPreviewPage() {
                         )}
                       </button>
                       
-                      {expandedTypes.has(type.name) && type.fields && Object.keys(type.fields).length > 0 && (
+                      {expandedTypes.has(type.name) && type.properties && type.properties.length > 0 && (
                         <div className="border-t px-3 py-2 space-y-1.5 bg-muted/30">
-                          <div className="text-xs font-medium text-muted-foreground mb-2">字段</div>
-                          {Object.entries(type.fields).map(([fieldName, fieldConfig]: [string, any]) => (
-                            <div key={fieldName} className="flex items-start gap-2 text-xs">
+                          <div className="text-xs font-medium text-muted-foreground mb-2">属性</div>
+                          {type.properties.map((prop) => (
+                            <div key={prop.name} className="flex items-start gap-2 text-xs">
                               <Badge variant="outline" className="shrink-0 text-xs px-1.5 py-0">
-                                {fieldName}
+                                {prop.name}
                               </Badge>
                               <span className="text-muted-foreground truncate">
-                                {typeof fieldConfig === 'object' 
-                                  ? (fieldConfig.description || fieldConfig.type || JSON.stringify(fieldConfig))
-                                  : String(fieldConfig)
-                                }
+                                {prop.description}
                               </span>
                             </div>
                           ))}

@@ -3,7 +3,6 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import Link from "next/link";
-import type { Route } from "next";
 import { Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
@@ -88,7 +87,7 @@ export default function AIPage() {
         <div className="text-sm text-muted-foreground">
           Zep 已连接：{zepUserId ? "已加载本地设置" : "未配置"}
         </div>
-        <Link href={"/zep" as Route} className="shrink-0">
+        <Link href={"/zep"} className="shrink-0">
           <Button variant="outline" size="sm">Zep 设置与上传</Button>
         </Link>
       </div>

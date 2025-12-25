@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, forwardRef } from "react";
-import { Graph, GraphRef } from "@/components/graph/Graph";
+import { Graph, type GraphRef } from "@/components/graph/Graph";
 import { GraphPopovers } from "@/components/graph/GraphPopovers";
 import type {
   RawTriplet,

@@ -153,13 +153,6 @@ export async function deleteEpisode(uuid: string) {
   return { success: true };
 }
 
-// Entity Types
-// export interface EntityTypeInfo {
-//   name: string;
-//   description?: string;
-//   fields?: Record<string, any>;
-// }
-
 export async function listEntityTypes(input: {
   graphId?: string;
   userId?: string;
