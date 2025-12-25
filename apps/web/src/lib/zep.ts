@@ -223,6 +223,42 @@ export async function ensureThread(threadId: string, userId: string) {
   }
 }
 
+export async function listThreads(options?: {
+  pageNumber?: number;
+  pageSize?: number;
+  orderBy?: string;
+  asc?: boolean;
+}) {
+  const client = getZepClient();
+  const response = await client.thread.listAll({
+    pageNumber: options?.pageNumber ?? 1,
+    pageSize: options?.pageSize ?? 50,
+    orderBy: options?.orderBy ?? "created_at",
+    asc: options?.asc ?? false,
+  });
+  return {
+    threads: response.threads ?? [],
+    totalCount: response.totalCount ?? 0,
+  };
+}
+
+export async function createThread(threadId: string, userId: string) {
+  const client = getZepClient();
+  await client.thread.create({ threadId, userId });
+  return { threadId, userId };
+}
+
+export async function getThread(threadId: string) {
+  const client = getZepClient();
+  const response = await client.thread.get(threadId);
+  return response;
+}
+
+export async function deleteThread(threadId: string) {
+  const client = getZepClient();
+  await client.thread.delete(threadId);
+}
+
 export async function ensureGraph(graphId?: string) {
   if (!graphId) return;
   const client = getZepClient();
@@ -257,6 +293,7 @@ export async function addThreadMessages(
   options?: { returnContext?: boolean; ignoreRoles?: string[] }
 ) {
   const client = getZepClient();
+  console.log("addThreadMessages", threadId, messages);
   return client.thread.addMessages(threadId, {
     messages,
     returnContext: options?.returnContext,
@@ -339,6 +376,64 @@ export async function addFactTriple(input: {
     userId: target.userId,
     createdAt: input.createdAt,
   });
+}
+
+export async function searchGraph(input: {
+  query: string;
+  graphId?: string;
+  userId?: string;
+  limit?: number;
+  minFactRating?: number;
+}) {
+  const client = getZepClient();
+  const target = resolveGraphTarget({ graphId: input.graphId, userId: input.userId });
+  if (!target.graphId && !target.userId) {
+    throw new Error("Missing userId or graphId for graph search");
+  }
+  const result = await client.graph.search({
+    query: input.query,
+    graphId: target.graphId,
+    userId: target.userId,
+    limit: input.limit ?? 20,
+    minFactRating: input.minFactRating,
+  });
+  return result;
+}
+
+export function formatGraphContextForLLM(searchResults: {
+  edges?: Array<{ fact: string; name: string; attributes?: Record<string, unknown> }>;
+  nodes?: Array<{ name: string; labels?: string[]; attributes?: Record<string, unknown> }>;
+}): string {
+  const lines: string[] = [];
+
+  // Format nodes (entities)
+  if (searchResults.nodes?.length) {
+    lines.push("## 相关实体");
+    for (const node of searchResults.nodes) {
+      const labels = node.labels?.join(", ") ?? "Unknown";
+      let line = `- **${node.name}** [${labels}]`;
+      if (node.attributes && Object.keys(node.attributes).length > 0) {
+        const attrs = Object.entries(node.attributes)
+          .filter(([, v]) => v !== null && v !== undefined && v !== "")
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("; ");
+        if (attrs) line += ` — ${attrs}`;
+      }
+      lines.push(line);
+    }
+    lines.push("");
+  }
+
+  // Format edges (facts/relationships)
+  if (searchResults.edges?.length) {
+    lines.push("## 相关事实与关系");
+    for (const edge of searchResults.edges) {
+      lines.push(`- ${edge.fact}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
 
 export function chunkText(input: string, maxChars = 8000) {

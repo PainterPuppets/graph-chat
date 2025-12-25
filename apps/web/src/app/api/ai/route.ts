@@ -1,14 +1,17 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, type UIMessage, convertToModelMessages } from "ai";
 
-import { applyWorldUpdates, parseWorldUpdatePayload } from "@/lib/world-updates";
+import {
+  applyWorldUpdates,
+  parseWorldUpdatePayload,
+} from "@/lib/world-updates";
 import {
   addThreadMessages,
-  ensureGraph,
   ensureThread,
   ensureUser,
-  ensureWorldOntology,
   getUserContext,
+  searchGraph,
+  formatGraphContextForLLM,
 } from "@/lib/zep";
 
 const openai = createOpenAI({
@@ -35,58 +38,78 @@ export async function POST(req: Request) {
 
   const zepEnabled = Boolean(process.env.ZEP_API_KEY);
   const userId = incomingUserId ?? process.env.ZEP_USER_ID ?? "demo-user";
-  const threadId = incomingThreadId ?? process.env.ZEP_THREAD_ID ?? "demo-thread";
-  const graphId = incomingGraphId ?? process.env.ZEP_GRAPH_ID;
-  const templateId = incomingTemplateId ?? process.env.ZEP_CONTEXT_TEMPLATE_ID;
+  const threadId = incomingThreadId;
+  const graphId = incomingGraphId;
+  const templateId = incomingTemplateId;
+
+  // Extract user's latest message text
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const userText = latestUserMessage ? extractText(latestUserMessage) : "";
 
   let zepContext = "";
-  if (zepEnabled) {
-    try {
-      await ensureUser(userId);
-      await ensureThread(threadId, userId);
-      await ensureGraph(graphId);
-      await ensureWorldOntology({ userId, graphId });
-      const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
-      const userText = latestUserMessage ? extractText(latestUserMessage) : "";
-      if (userText) {
-        await addThreadMessages(threadId, [{ role: "user", content: userText }]);
-        const contextResponse = await getUserContext(threadId, {
-          templateId,
-          mode: "basic",
-        });
-        zepContext = contextResponse.context ?? "";
-      }
-    } catch (error) {
-      console.error("Zep context fetch failed:", error);
+  let graphContext = "";
+  
+  // Only fetch context if we have a valid threadId
+  console.log("ensureThread", zepEnabled, threadId, userText);
+  if (zepEnabled && threadId && userText) {
+    await ensureUser(userId);
+    await ensureThread(threadId, userId);
+
+    // Get thread context (conversation memory) - do NOT add message yet
+    const contextResponse = await getUserContext(threadId, {
+      templateId,
+      mode: "basic",
+    });
+    zepContext = contextResponse.context ?? "";
+
+    // Search graph for relevant knowledge if graphId is provided
+    if (graphId) {
+      const graphSearchResults = await searchGraph({
+        query: userText,
+        graphId,
+        limit: 20,
+      });
+      graphContext = formatGraphContextForLLM(graphSearchResults);
     }
   }
 
+  const modelMessages = await buildModelMessages(messages, zepContext, graphContext);
+
+  console.log("modelMessages", modelMessages);
   const result = streamText({
-    model: openai.chat(process.env.MODEL_NAME ?? 'gpt-4o-mini'),
-    messages: await buildModelMessages(messages, zepContext),
+    model: openai.chat(process.env.MODEL_NAME ?? "gpt-4o-mini"),
+    messages: modelMessages,
     onFinish: async (event) => {
-      if (!zepEnabled) return;
+      // Only save to Zep if we have valid threadId and userText
+      console.log("onFinish", zepEnabled, threadId, userText);
+      if (!zepEnabled || !threadId || !userText) return;
+      
       const assistantText = event.text?.trim();
       if (!assistantText) return;
-      try {
-        const parsed = parseWorldUpdatePayload(assistantText);
-        if (parsed) {
-          await addThreadMessages(threadId, [
-            {
-              role: "assistant",
-              content: parsed.assistant_reply,
-              metadata: {
-                world_updates: parsed.world_updates,
-                raw_json: assistantText,
-              },
+      
+      const parsed = parseWorldUpdatePayload(assistantText);
+      const assistantContent = parsed?.assistant_reply ?? assistantText;
+      
+      // Add both user message and assistant message together after LLM responds
+      await addThreadMessages(threadId, [
+        { role: "user", content: userText },
+        {
+          role: "assistant",
+          content: assistantContent,
+          ...(parsed && {
+            metadata: {
+              world_updates: parsed.world_updates,
+              raw_json: assistantText,
             },
-          ]);
-          await applyWorldUpdates({ updates: parsed, userId, graphId });
-        } else {
-          await addThreadMessages(threadId, [{ role: "assistant", content: assistantText }]);
-        }
-      } catch (error) {
-        console.error("Zep assistant message write failed:", error);
+          }),
+        },
+      ]);
+      
+      // Apply world updates if parsed
+      if (parsed) {
+        await applyWorldUpdates({ updates: parsed, userId, graphId });
       }
     },
   });
@@ -103,13 +126,38 @@ function extractText(message: UIMessage) {
   return "";
 }
 
-async function buildModelMessages(messages: UIMessage[], zepContext: string) {
+async function buildModelMessages(
+  messages: UIMessage[],
+  zepContext: string,
+  graphContext: string
+) {
   const modelMessages = await convertToModelMessages(messages);
+
+  const contextParts: string[] = [];
+
+  if (graphContext) {
+    contextParts.push("# KNOWLEDGE GRAPH (知识图谱)");
+    contextParts.push("以下是从知识图谱中检索到的相关实体和事实：");
+    contextParts.push(graphContext);
+
+    console.log("以下是从知识图谱中检索到的相关实体和事实：", graphContext);
+  }
+
+  if (zepContext) {
+    contextParts.push("# CONVERSATION CONTEXT (对话记忆)");
+    contextParts.push(zepContext);
+
+    console.log("对话记忆:", zepContext);
+  }
+
+  const fullContext =
+    contextParts.length > 0 ? contextParts.join("\n\n") : "(empty)";
+
   return [
     {
       role: "system" as const,
       content: [
-        "你是一个世界模拟引擎中的“导演”。",
+        "你是一个世界模拟引擎中的「导演」。",
         "你必须遵守以下规则：",
         "1) 世界状态由知识图谱表示，包含角色、派系、地点、物品、事件和抽象概念。",
         "2) 你收到的 WORLD CONTEXT 是当前世界的真实状态，不能随意否定其中事实。",
@@ -134,7 +182,7 @@ async function buildModelMessages(messages: UIMessage[], zepContext: string) {
         "}",
         "",
         "WORLD CONTEXT:",
-        zepContext || "(empty)",
+        fullContext,
       ].join("\n"),
     },
     ...modelMessages,

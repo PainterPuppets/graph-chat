@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Send, Settings2, MessageCircle, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 
 import { Button } from "@/components/ui/button";
@@ -11,28 +11,168 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { listGraphs } from "@/app/graph/actions";
+import {
+  listThreads,
+  createThread,
+  type ThreadInfo,
+} from "@/app/chat/actions";
 
 type GraphInfo = {
   graphId: string;
   name?: string;
 };
 
-export default function ChatPage() {
+type ChatConfig = {
+  userId: string;
+  threadId: string;
+  graphId: string;
+  templateId: string;
+};
+
+// Separate chat component that uses useChat - will remount when key changes
+function ChatArea({ config, selectedGraph }: { config: ChatConfig; selectedGraph?: GraphInfo }) {
   const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Create transport with current config
+  const transport = new DefaultChatTransport({
+    api: "/api/ai",
+    body: {
+      userId: config.userId,
+      threadId: config.threadId,
+      graphId: config.graphId,
+      templateId: config.templateId,
+    },
+  });
+
+  const { messages, sendMessage, status } = useChat({ transport });
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    sendMessage({ text });
+    setInput("");
+  };
+
+  return (
+    <>
+      {/* Messages */}
+      <ScrollArea className="flex-1 p-4">
+        {messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center text-muted-foreground">
+              <MessageCircle className="mx-auto mb-4 h-16 w-16 opacity-30" />
+              <p className="text-lg font-medium">开始对话</p>
+              <p className="text-sm">
+                {!config.threadId ? (
+                  "请先新建一个对话"
+                ) : selectedGraph ? (
+                  `基于 "${selectedGraph.name || selectedGraph.graphId}" 知识图谱进行对话`
+                ) : (
+                  "选择一个 Graph 以获得更好的上下文回答"
+                )}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 pb-4">
+            {messages.map((message, index) => {
+              const rawText =
+                message.parts?.map((part) => (part.type === "text" ? part.text : "")).join("") ??
+                "";
+              const isLatest = index === messages.length - 1;
+              const isStreamingMessage = status === "streaming" && message.role === "assistant" && isLatest;
+              const displayText = getDisplayText(rawText, message.role, isStreamingMessage);
+
+              return (
+                <div
+                  key={message.id}
+                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                      message.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
+                    }`}
+                  >
+                    {message.role === "assistant" && (
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">
+                        AI 助手
+                      </p>
+                    )}
+                    {isStreamingMessage && !displayText ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="text-sm">思考中...</span>
+                      </div>
+                    ) : (
+                      <Streamdown isAnimating={isStreamingMessage}>{displayText}</Streamdown>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </ScrollArea>
+
+      {/* Input */}
+      <div className="border-t p-4">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <Input
+            name="prompt"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="输入消息..."
+            className="flex-1"
+            autoComplete="off"
+            autoFocus
+          />
+          <Button type="submit" size="icon" disabled={status === "streaming" || !config.threadId}>
+            <Send className="h-4 w-4" />
+          </Button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+function getDisplayText(rawText: string, role: string, isStreaming: boolean) {
+  if (isStreaming && role === "assistant" && !rawText) {
+    return "";
+  }
+  if (role !== "assistant") return rawText;
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed.assistant_reply === "string") {
+      return parsed.assistant_reply;
+    }
+  } catch {
+    return rawText;
+  }
+  return rawText;
+}
+
+export default function ChatPage() {
   const [zepUserId, setZepUserId] = useState("");
   const [zepThreadId, setZepThreadId] = useState("");
   const [zepGraphId, setZepGraphId] = useState("");
   const [zepTemplateId, setZepTemplateId] = useState("");
   const [graphs, setGraphs] = useState<GraphInfo[]>([]);
+  const [threads, setThreads] = useState<ThreadInfo[]>([]);
   const [isLoadingGraphs, setIsLoadingGraphs] = useState(true);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(true);
+  const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Load initial settings from localStorage
   useEffect(() => {
@@ -42,15 +182,14 @@ export default function ChatPage() {
     const storedTemplateId = localStorage.getItem("zepTemplateId");
 
     const userId = storedUserId ?? crypto.randomUUID();
-    const threadId = storedThreadId ?? crypto.randomUUID();
 
     setZepUserId(userId);
-    setZepThreadId(threadId);
+    setZepThreadId(storedThreadId ?? "");
     setZepGraphId(storedGraphId ?? "");
     setZepTemplateId(storedTemplateId ?? "");
 
     localStorage.setItem("zepUserId", userId);
-    localStorage.setItem("zepThreadId", threadId);
+    setIsInitialized(true);
   }, []);
 
   // Load graphs list
@@ -61,6 +200,24 @@ export default function ChatPage() {
       .catch((error) => console.error("Failed to load graphs:", error))
       .finally(() => setIsLoadingGraphs(false));
   }, []);
+
+  // Load threads list
+  useEffect(() => {
+    if (!isInitialized) return;
+    setIsLoadingThreads(true);
+    listThreads()
+      .then((allThreads) => {
+        setThreads(allThreads);
+        // Auto-select the first thread if none selected
+        if (!zepThreadId && allThreads.length > 0) {
+          const firstThread = allThreads[0];
+          setZepThreadId(firstThread.threadId);
+          localStorage.setItem("zepThreadId", firstThread.threadId);
+        }
+      })
+      .catch((error) => console.error("Failed to load threads:", error))
+      .finally(() => setIsLoadingThreads(false));
+  }, [isInitialized, zepThreadId]);
 
   // Save settings to localStorage
   useEffect(() => {
@@ -79,43 +236,41 @@ export default function ChatPage() {
     localStorage.setItem("zepTemplateId", zepTemplateId);
   }, [zepTemplateId]);
 
-  const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        api: "/api/ai",
-        body: {
-          userId: zepUserId,
-          threadId: zepThreadId,
-          graphId: zepGraphId,
-          templateId: zepTemplateId,
-        },
-      }),
-    [zepUserId, zepThreadId, zepGraphId, zepTemplateId]
-  );
-
-  const { messages, sendMessage, status } = useChat({ transport });
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-    sendMessage({ text });
-    setInput("");
-  };
-
   const selectedGraph = graphs.find(g => g.graphId === zepGraphId);
+  const selectedThread = threads.find(t => t.threadId === zepThreadId);
 
-  const handleNewThread = () => {
-    const newThreadId = crypto.randomUUID();
-    setZepThreadId(newThreadId);
-    localStorage.setItem("zepThreadId", newThreadId);
+  const handleNewThread = async () => {
+    if (!zepUserId || isCreatingThread) return;
+    setIsCreatingThread(true);
+    try {
+      const newThread = await createThread(zepUserId);
+      setThreads((prev) => [newThread, ...prev]);
+      setZepThreadId(newThread.threadId);
+      localStorage.setItem("zepThreadId", newThread.threadId);
+    } catch (error) {
+      console.error("Failed to create thread:", error);
+    } finally {
+      setIsCreatingThread(false);
+    }
   };
+
+  // Create a stable key for ChatArea - changes when thread changes
+  const chatKey = `${zepUserId}-${zepThreadId}`;
+  const chatConfig: ChatConfig = {
+    userId: zepUserId,
+    threadId: zepThreadId,
+    graphId: zepGraphId,
+    templateId: zepTemplateId,
+  };
+
+  // Don't render chat until initialized
+  if (!isInitialized) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -157,18 +312,42 @@ export default function ChatPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="thread-id">Thread ID</Label>
+              <Label>选择对话</Label>
               <div className="flex gap-2">
-                <Input
-                  id="thread-id"
+                <select
                   value={zepThreadId}
                   onChange={(e) => setZepThreadId(e.target.value)}
-                  className="flex-1 font-mono text-xs"
-                />
-                <Button variant="outline" size="sm" onClick={handleNewThread}>
-                  新建
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={isLoadingThreads}
+                >
+                  {isLoadingThreads ? (
+                    <option value="">加载中...</option>
+                  ) : threads.length === 0 ? (
+                    <option value="">暂无对话，请新建</option>
+                  ) : (
+                    threads.map((thread) => (
+                      <option key={thread.threadId} value={thread.threadId}>
+                        {new Date(thread.createdAt).toLocaleString("zh-CN")}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNewThread}
+                  disabled={isCreatingThread || !zepUserId}
+                >
+                  {isCreatingThread ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "新建"
+                  )}
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                每个对话独立保存上下文记忆
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -209,111 +388,28 @@ export default function ChatPage() {
             </Button>
             <div>
               <h1 className="font-semibold">AI 对话</h1>
-              {selectedGraph ? (
-                <Badge variant="secondary" className="text-xs">
-                  使用: {selectedGraph.name || selectedGraph.graphId}
-                </Badge>
-              ) : (
-                <span className="text-xs text-muted-foreground">未选择 Graph</span>
-              )}
+              <div className="flex items-center gap-2">
+                {selectedThread ? (
+                  <Badge variant="outline" className="text-xs">
+                    {new Date(selectedThread.createdAt).toLocaleString("zh-CN")}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">未选择对话</span>
+                )}
+                {selectedGraph && (
+                  <Badge variant="secondary" className="text-xs">
+                    {selectedGraph.name || selectedGraph.graphId}
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-4">
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center text-muted-foreground">
-                <MessageCircle className="mx-auto mb-4 h-16 w-16 opacity-30" />
-                <p className="text-lg font-medium">开始对话</p>
-                <p className="text-sm">
-                  {selectedGraph 
-                    ? `基于 "${selectedGraph.name || selectedGraph.graphId}" 知识图谱进行对话`
-                    : "选择一个 Graph 以获得更好的上下文回答"
-                  }
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4 pb-4">
-              {messages.map((message, index) => {
-                const rawText =
-                  message.parts?.map((part) => (part.type === "text" ? part.text : "")).join("") ??
-                  "";
-                const isLatest = index === messages.length - 1;
-                const isStreamingMessage = status === "streaming" && message.role === "assistant" && isLatest;
-                const displayText = getDisplayText(rawText, message.role, isStreamingMessage);
-
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted"
-                      }`}
-                    >
-                      {message.role === "assistant" && (
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">
-                          AI 助手
-                        </p>
-                      )}
-                      {isStreamingMessage && !displayText ? (
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm">思考中...</span>
-                        </div>
-                      ) : (
-                        <Streamdown isAnimating={isStreamingMessage}>{displayText}</Streamdown>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </ScrollArea>
-
-        {/* Input */}
-        <div className="border-t p-4">
-          <form onSubmit={handleSubmit} className="flex items-center gap-2">
-            <Input
-              name="prompt"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="输入消息..."
-              className="flex-1"
-              autoComplete="off"
-              autoFocus
-            />
-            <Button type="submit" size="icon" disabled={status === "streaming"}>
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
-        </div>
+        {/* Chat Area - uses key to remount when thread changes */}
+        <ChatArea key={chatKey} config={chatConfig} selectedGraph={selectedGraph} />
       </div>
     </div>
   );
-}
-
-function getDisplayText(rawText: string, role: string, isStreaming: boolean) {
-  if (isStreaming && role === "assistant" && !rawText) {
-    return "";
-  }
-  if (role !== "assistant") return rawText;
-  try {
-    const parsed = JSON.parse(rawText);
-    if (parsed && typeof parsed.assistant_reply === "string") {
-      return parsed.assistant_reply;
-    }
-  } catch {
-    return rawText;
-  }
-  return rawText;
 }
 
