@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, type UIMessage, convertToModelMessages } from "ai";
 
+import { validateApiKey } from "@/lib/auth";
 import {
   applyWorldUpdates,
   parseWorldUpdatePayload,
@@ -22,6 +23,9 @@ const openai = createOpenAI({
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  const authError = validateApiKey(req);
+  if (authError) return authError;
+
   const {
     messages,
     userId: incomingUserId,

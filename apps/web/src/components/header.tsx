@@ -1,13 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings2, Eye, MessageCircle, Home } from "lucide-react";
+import { Settings2, Eye, MessageCircle, Home, Key } from "lucide-react";
 
+import { Button } from "./ui/button";
 import { ModeToggle } from "./mode-toggle";
+import { useApiKey } from "./api-key-provider";
 import { cn } from "@/lib/utils";
 
 export default function Header() {
   const pathname = usePathname();
+  const { apiKey, openConfig } = useApiKey();
 
   const links = [
     { to: "/", label: "Home", icon: Home },
@@ -40,6 +43,14 @@ export default function Header() {
           })}
         </nav>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={openConfig}
+            title={apiKey ? "API Key 已配置" : "配置 API Key"}
+          >
+            <Key className={cn("h-4 w-4", apiKey ? "text-green-500" : "text-muted-foreground")} />
+          </Button>
           <ModeToggle />
         </div>
       </div>

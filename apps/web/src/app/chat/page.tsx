@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Send, Settings2, MessageCircle, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
@@ -11,16 +12,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { listGraphs } from "@/app/graph/actions";
-import {
-  listThreads,
-  createThread,
-  type ThreadInfo,
-} from "@/app/chat/actions";
+import { getApiKeyHeader } from "@/components/api-key-provider";
+import { trpc } from "@/utils/trpc";
 
 type GraphInfo = {
   graphId: string;
   name?: string;
+};
+
+type ThreadInfo = {
+  threadId: string;
+  userId: string;
+  createdAt: string;
 };
 
 type ChatConfig = {
@@ -38,6 +41,7 @@ function ChatArea({ config, selectedGraph }: { config: ChatConfig; selectedGraph
   // Create transport with current config
   const transport = new DefaultChatTransport({
     api: "/api/ai",
+    headers: getApiKeyHeader(),
     body: {
       userId: config.userId,
       threadId: config.threadId,
@@ -166,13 +170,22 @@ export default function ChatPage() {
   const [zepThreadId, setZepThreadId] = useState("");
   const [zepGraphId, setZepGraphId] = useState("");
   const [zepTemplateId, setZepTemplateId] = useState("");
-  const [graphs, setGraphs] = useState<GraphInfo[]>([]);
-  const [threads, setThreads] = useState<ThreadInfo[]>([]);
-  const [isLoadingGraphs, setIsLoadingGraphs] = useState(true);
-  const [isLoadingThreads, setIsLoadingThreads] = useState(true);
-  const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // tRPC queries
+  const graphsQuery = useQuery(trpc.graph.list.queryOptions());
+  const threadsQuery = useQuery({
+    ...trpc.thread.list.queryOptions(),
+    enabled: isInitialized,
+  });
+  const createThreadMutation = useMutation(trpc.thread.create.mutationOptions());
+
+  const graphs = graphsQuery.data ?? [];
+  const threads = threadsQuery.data ?? [];
+  const isLoadingGraphs = graphsQuery.isLoading;
+  const isLoadingThreads = threadsQuery.isLoading;
+  const isCreatingThread = createThreadMutation.isPending;
 
   // Load initial settings from localStorage
   useEffect(() => {
@@ -192,32 +205,14 @@ export default function ChatPage() {
     setIsInitialized(true);
   }, []);
 
-  // Load graphs list
+  // Auto-select the first thread if none selected
   useEffect(() => {
-    setIsLoadingGraphs(true);
-    listGraphs()
-      .then(setGraphs)
-      .catch((error) => console.error("Failed to load graphs:", error))
-      .finally(() => setIsLoadingGraphs(false));
-  }, []);
-
-  // Load threads list
-  useEffect(() => {
-    if (!isInitialized) return;
-    setIsLoadingThreads(true);
-    listThreads()
-      .then((allThreads) => {
-        setThreads(allThreads);
-        // Auto-select the first thread if none selected
-        if (!zepThreadId && allThreads.length > 0) {
-          const firstThread = allThreads[0];
-          setZepThreadId(firstThread.threadId);
-          localStorage.setItem("zepThreadId", firstThread.threadId);
-        }
-      })
-      .catch((error) => console.error("Failed to load threads:", error))
-      .finally(() => setIsLoadingThreads(false));
-  }, [isInitialized, zepThreadId]);
+    if (!zepThreadId && threads.length > 0) {
+      const firstThread = threads[0];
+      setZepThreadId(firstThread.threadId);
+      localStorage.setItem("zepThreadId", firstThread.threadId);
+    }
+  }, [threads, zepThreadId]);
 
   // Save settings to localStorage
   useEffect(() => {
@@ -241,16 +236,13 @@ export default function ChatPage() {
 
   const handleNewThread = async () => {
     if (!zepUserId || isCreatingThread) return;
-    setIsCreatingThread(true);
     try {
-      const newThread = await createThread(zepUserId);
-      setThreads((prev) => [newThread, ...prev]);
+      const newThread = await createThreadMutation.mutateAsync({ userId: zepUserId });
+      threadsQuery.refetch();
       setZepThreadId(newThread.threadId);
       localStorage.setItem("zepThreadId", newThread.threadId);
     } catch (error) {
       console.error("Failed to create thread:", error);
-    } finally {
-      setIsCreatingThread(false);
     }
   };
 

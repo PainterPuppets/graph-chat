@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { GraphVisualization } from "@/components/graph/GraphVisualization";
-import type { RawTriplet } from "@/lib/types/graph";
-import { listGraphs, getGraphTriplets } from "./actions";
+import { getApiKeyHeader } from "@/components/api-key-provider";
+import { trpc } from "@/utils/trpc";
 
 type UploadSummary = {
   files: number;
@@ -31,14 +32,30 @@ export default function ZepSettingsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [triplets, setTriplets] = useState<RawTriplet[]>([]);
-  const [isLoadingGraph, setIsLoadingGraph] = useState(false);
-  const [graphError, setGraphError] = useState<string | null>(null);
-  const [graphs, setGraphs] = useState<
-    Array<{ graphId: string; name?: string }>
-  >([]);
-  const [isLoadingGraphs, setIsLoadingGraphs] = useState(false);
   const [selectedGraphId, setSelectedGraphId] = useState<string>("");
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // tRPC queries
+  const graphsQuery = useQuery(trpc.graph.list.queryOptions());
+  const tripletsQuery = useQuery({
+    ...trpc.graph.getTriplets.queryOptions({
+      graphId: selectedGraphId || undefined,
+      userId: zepUserId || undefined,
+    }),
+    enabled: !!selectedGraphId && isInitialized,
+  });
+
+  const graphs = graphsQuery.data ?? [];
+  const triplets = tripletsQuery.data ?? [];
+  const isLoadingGraphs = graphsQuery.isLoading;
+  const isLoadingGraph = tripletsQuery.isLoading;
+  const graphError = tripletsQuery.error
+    ? tripletsQuery.error instanceof Error
+      ? tripletsQuery.error.message
+      : "加载图形数据失败"
+    : triplets.length === 0 && selectedGraphId && !isLoadingGraph
+    ? "没有找到图形数据"
+    : null;
 
   useEffect(() => {
     const storedUserId = localStorage.getItem("zepUserId");
@@ -56,6 +73,7 @@ export default function ZepSettingsPage() {
 
     localStorage.setItem("zepUserId", userId);
     localStorage.setItem("zepThreadId", threadId);
+    setIsInitialized(true);
   }, []);
 
   useEffect(() => {
@@ -74,36 +92,11 @@ export default function ZepSettingsPage() {
     localStorage.setItem("zepTemplateId", zepTemplateId);
   }, [zepTemplateId]);
 
-  // Load graphs from server
-  useEffect(() => {
-    setIsLoadingGraphs(true);
-    listGraphs()
-      .then(setGraphs)
-      .catch((error) => console.error("Failed to load graphs:", error))
-      .finally(() => setIsLoadingGraphs(false));
-  }, []);
-
-  // Auto-load graph when selectedGraphId changes
+  // Update zepGraphId when selectedGraphId changes
   useEffect(() => {
     if (selectedGraphId) {
       setZepGraphId(selectedGraphId);
-      setIsLoadingGraph(true);
-      setGraphError(null);
-
-      getGraphTriplets({ graphId: selectedGraphId, userId: zepUserId || undefined })
-        .then((triplets) => {
-          setTriplets(triplets);
-          if (triplets.length === 0) {
-            setGraphError("没有找到图形数据");
-          }
-        })
-        .catch((error) => {
-          setGraphError(error instanceof Error ? error.message : "加载图形数据失败");
-          setTriplets([]);
-        })
-        .finally(() => setIsLoadingGraph(false));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGraphId]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,6 +122,7 @@ export default function ZepSettingsPage() {
     try {
       const response = await fetch("/api/zep/ingest", {
         method: "POST",
+        headers: getApiKeyHeader(),
         body: formData,
       });
       const data = (await response.json()) as UploadSummary & {
@@ -149,43 +143,11 @@ export default function ZepSettingsPage() {
     }
   };
 
-  const handleLoadGraph = async () => {
+  const handleLoadGraph = () => {
     const graphIdToLoad = zepGraphId || selectedGraphId;
-    if (!graphIdToLoad && !zepUserId) {
-      setGraphError("请先设置 Graph ID 或 User ID");
-      return;
-    }
-
-    await handleLoadGraphWithId(graphIdToLoad || undefined);
-  };
-
-  const handleLoadGraphWithId = async (graphId?: string) => {
-    const graphIdToLoad = graphId || zepGraphId || selectedGraphId;
-    if (!graphIdToLoad && !zepUserId) {
-      setGraphError("请先设置 Graph ID 或 User ID");
-      return;
-    }
-
-    setIsLoadingGraph(true);
-    setGraphError(null);
-
-    try {
-      const triplets = await getGraphTriplets({
-        graphId: graphIdToLoad || undefined,
-        userId: zepUserId || undefined,
-      });
-
-      setTriplets(triplets);
-      if (triplets.length === 0) {
-        setGraphError("没有找到图形数据");
-      }
-    } catch (error) {
-      setGraphError(
-        error instanceof Error ? error.message : "加载图形数据失败"
-      );
-      setTriplets([]);
-    } finally {
-      setIsLoadingGraph(false);
+    if (graphIdToLoad) {
+      setSelectedGraphId(graphIdToLoad);
+      tripletsQuery.refetch();
     }
   };
 

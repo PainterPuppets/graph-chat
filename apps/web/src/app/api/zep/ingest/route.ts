@@ -2,6 +2,7 @@ import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 
+import { validateApiKey } from "@/lib/auth";
 import {
   addGraphDataBatch,
   chunkText,
@@ -11,6 +12,9 @@ import {
 } from "@/lib/zep";
 
 export async function POST(req: Request) {
+  const authError = validateApiKey(req);
+  if (authError) return authError;
+
   if (!process.env.ZEP_API_KEY) {
     return Response.json(
       { error: "ZEP_API_KEY is not configured" },

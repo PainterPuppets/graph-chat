@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import { Plus, Upload, Trash2, Loader2, FileText, RefreshCw, Calendar } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,37 +17,24 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { 
-  listGraphs, 
-  createGraph, 
-  deleteGraph, 
-  listEpisodes, 
-  deleteEpisode,
-} from "../actions";
-import { Zep } from "@getzep/zep-cloud";
+import { getApiKeyHeader } from "@/components/api-key-provider";
+import { trpc } from "@/utils/trpc";
 
 type UploadSummary = {
   files: number;
   chunks: number;
 };
 
-type GraphInfo = {
-  graphId: string;
-  name?: string;
-};
-
 export default function GraphSettingsPage() {
   // State for creating new graph
   const [newGraphId, setNewGraphId] = useState("");
   const [newGraphName, setNewGraphName] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
-  // State for graphs list
-  const [graphs, setGraphs] = useState<GraphInfo[]>([]);
-  const [isLoadingGraphs, setIsLoadingGraphs] = useState(true);
+  // State for selection
   const [selectedGraphForUpload, setSelectedGraphForUpload] = useState<string>("");
+  const [selectedGraphForEpisodes, setSelectedGraphForEpisodes] = useState<string>("");
 
   // State for file upload
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -54,54 +42,22 @@ export default function GraphSettingsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State for episodes
-  const [episodes, setEpisodes] = useState<Zep.Episode[]>([]);
-  const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
-  const [selectedGraphForEpisodes, setSelectedGraphForEpisodes] = useState<string>("");
-  const [deletingEpisodeId, setDeletingEpisodeId] = useState<string | null>(null);
+  // tRPC queries and mutations
+  const graphsQuery = useQuery(trpc.graph.list.queryOptions());
+  const episodesQuery = useQuery({
+    ...trpc.graph.listEpisodes.queryOptions({ graphId: selectedGraphForEpisodes }),
+    enabled: !!selectedGraphForEpisodes,
+  });
 
-  // Load graphs on mount
-  useEffect(() => {
-    loadGraphs();
-  }, []);
+  const createGraphMutation = useMutation(trpc.graph.create.mutationOptions());
+  const deleteGraphMutation = useMutation(trpc.graph.delete.mutationOptions());
+  const deleteEpisodeMutation = useMutation(trpc.graph.deleteEpisode.mutationOptions());
 
-  // Load episodes when selected graph changes
-  useEffect(() => {
-    if (selectedGraphForEpisodes) {
-      loadEpisodes(selectedGraphForEpisodes);
-    } else {
-      setEpisodes([]);
-    }
-  }, [selectedGraphForEpisodes]);
-
-  const loadGraphs = async () => {
-    setIsLoadingGraphs(true);
-    try {
-      const loadedGraphs = await listGraphs();
-      setGraphs(loadedGraphs);
-      // Auto-select first graph if available
-      if (loadedGraphs.length > 0 && !selectedGraphForUpload) {
-        setSelectedGraphForUpload(loadedGraphs[0].graphId);
-      }
-    } catch (error) {
-      console.error("Failed to load graphs:", error);
-    } finally {
-      setIsLoadingGraphs(false);
-    }
-  };
-
-  const loadEpisodes = async (graphId: string) => {
-    setIsLoadingEpisodes(true);
-    try {
-      const loadedEpisodes = await listEpisodes({ graphId });
-      setEpisodes(loadedEpisodes);
-    } catch (error) {
-      console.error("Failed to load episodes:", error);
-      setEpisodes([]);
-    } finally {
-      setIsLoadingEpisodes(false);
-    }
-  };
+  const graphs = graphsQuery.data ?? [];
+  const episodes = episodesQuery.data ?? [];
+  const isLoadingGraphs = graphsQuery.isLoading;
+  const isLoadingEpisodes = episodesQuery.isLoading;
+  const isCreating = createGraphMutation.isPending;
 
   const handleCreateGraph = async () => {
     if (!newGraphId.trim()) {
@@ -109,23 +65,20 @@ export default function GraphSettingsPage() {
       return;
     }
 
-    setIsCreating(true);
     setCreateError(null);
     setCreateSuccess(null);
 
     try {
-      await createGraph({
+      await createGraphMutation.mutateAsync({
         graphId: newGraphId.trim(),
         name: newGraphName.trim() || undefined,
       });
       setCreateSuccess(`Graph "${newGraphId}" 创建成功！`);
       setNewGraphId("");
       setNewGraphName("");
-      await loadGraphs();
+      graphsQuery.refetch();
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "创建失败");
-    } finally {
-      setIsCreating(false);
     }
   };
 
@@ -135,14 +88,13 @@ export default function GraphSettingsPage() {
     }
 
     try {
-      await deleteGraph(graphId);
-      await loadGraphs();
+      await deleteGraphMutation.mutateAsync({ graphId });
+      graphsQuery.refetch();
       if (selectedGraphForUpload === graphId) {
         setSelectedGraphForUpload("");
       }
       if (selectedGraphForEpisodes === graphId) {
         setSelectedGraphForEpisodes("");
-        setEpisodes([]);
       }
     } catch (error) {
       console.error("Failed to delete graph:", error);
@@ -154,16 +106,11 @@ export default function GraphSettingsPage() {
       return;
     }
 
-    setDeletingEpisodeId(uuid);
     try {
-      await deleteEpisode(uuid);
-      if (selectedGraphForEpisodes) {
-        await loadEpisodes(selectedGraphForEpisodes);
-      }
+      await deleteEpisodeMutation.mutateAsync({ uuid });
+      episodesQuery.refetch();
     } catch (error) {
       console.error("Failed to delete episode:", error);
-    } finally {
-      setDeletingEpisodeId(null);
     }
   };
 
@@ -195,6 +142,7 @@ export default function GraphSettingsPage() {
     try {
       const response = await fetch("/api/zep/ingest", {
         method: "POST",
+        headers: getApiKeyHeader(),
         body: formData,
       });
       const data = (await response.json()) as UploadSummary & {
@@ -211,7 +159,7 @@ export default function GraphSettingsPage() {
       
       // Refresh episodes if viewing the same graph
       if (selectedGraphForEpisodes === selectedGraphForUpload) {
-        await loadEpisodes(selectedGraphForUpload);
+        await episodesQuery.refetch();
       }
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : "上传失败");
@@ -458,7 +406,7 @@ export default function GraphSettingsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => loadEpisodes(selectedGraphForEpisodes)}
+                onClick={() => episodesQuery.refetch()}
                 disabled={isLoadingEpisodes}
               >
                 <RefreshCw className={`mr-2 h-4 w-4 ${isLoadingEpisodes ? 'animate-spin' : ''}`} />
@@ -538,10 +486,10 @@ export default function GraphSettingsPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteEpisode(episode.uuid)}
-                          disabled={deletingEpisodeId === episode.uuid}
+                          disabled={deleteEpisodeMutation.isPending}
                           className="text-destructive hover:text-destructive shrink-0"
                         >
-                          {deletingEpisodeId === episode.uuid ? (
+                          {deleteEpisodeMutation.isPending && deleteEpisodeMutation.variables?.uuid === episode.uuid ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />

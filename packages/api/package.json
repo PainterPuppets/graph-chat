@@ -17,6 +17,7 @@
   "dependencies": {
     "@trpc/server": "catalog:",
     "@trpc/client": "catalog:",
+    "@getzep/zep-cloud": "^3.13.0",
     "next": "^16.0.10",
     "dotenv": "catalog:",
     "zod": "catalog:",
