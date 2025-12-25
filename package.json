@@ -1,0 +1,41 @@
+{
+  "name": "graph-chat",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "dotenv": "^17.2.2",
+      "zod": "^4.1.13",
+      "typescript": "^5",
+      "@trpc/server": "^11.7.2",
+      "@trpc/client": "^11.7.2",
+      "@libsql/client": "0.15.15",
+      "libsql": "0.5.22"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "build": "bun run --filter '*' build",
+    "check-types": "bun run --filter '*' check-types",
+    "dev:native": "bun run --filter native dev",
+    "dev:web": "bun run --filter web dev",
+    "db:push": "bun run --filter @graph-chat/db db:push",
+    "db:studio": "bun run --filter @graph-chat/db db:studio",
+    "db:generate": "bun run --filter @graph-chat/db db:generate",
+    "db:migrate": "bun run --filter @graph-chat/db db:migrate",
+    "db:local": "bun run --filter @graph-chat/db db:local"
+  },
+  "packageManager": "bun@1.3.1",
+  "dependencies": {
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "^22.13.11"
+  }
+}

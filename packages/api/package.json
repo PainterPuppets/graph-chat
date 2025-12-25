@@ -1,0 +1,25 @@
+{
+  "name": "@graph-chat/api",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@graph-chat/config": "workspace:*"
+  },
+  "dependencies": {
+    "@trpc/server": "catalog:",
+    "@trpc/client": "catalog:",
+    "next": "^16.0.10",
+    "dotenv": "catalog:",
+    "zod": "catalog:",
+    "@graph-chat/db": "workspace:*"
+  }
+}
